@@ -40,6 +40,7 @@ public class IndexInspector {
     boolean raw = false;
     String queryString = null;
     int hitsPerPage = 10;
+
     
     for(int i = 0;i < args.length;i++) {
       if ("-index".equals(args[i])) {
