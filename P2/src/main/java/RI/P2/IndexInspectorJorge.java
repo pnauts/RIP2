@@ -5,7 +5,9 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -15,7 +17,10 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.IndexWriterConfig.OpenMode;
+import org.apache.lucene.index.SingleTermsEnum;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.Terms;
+import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
@@ -23,10 +28,12 @@ import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.TermRangeTermsEnum;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TotalHitCountCollector;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Version;
 
 /** Simple command-line based search demo. */
@@ -83,7 +90,7 @@ public class IndexInspectorJorge {
 		
 		MultiFieldQueryParser parser = new MultiFieldQueryParser(Version.LUCENE_40, auxfields, analyzer);
 		
-			doPagingSearch(searcher, stqueries, outdir, fields);
+			doPagingSearch(searcher, stqueries, outdir, fields,reader);
 		}
 	
 
@@ -100,7 +107,7 @@ public class IndexInspectorJorge {
 	 */
 	public static void doPagingSearch(
 			IndexSearcher searcher, List<String> queries, 
-			Path outpath, List<String> fields) throws IOException {
+			Path outpath, List<String> fields,IndexReader reader) throws IOException {
 
 		// Collect enough docs to show 5 pages
 		TotalHitCountCollector collector = new TotalHitCountCollector();
@@ -115,6 +122,9 @@ public class IndexInspectorJorge {
 		TopDocs results = searcher.search(booleanQuery,
 				Math.max(1, collector.getTotalHits()));
 		ScoreDoc[] hits = results.scoreDocs;
+
+	
+		
 
 		int numTotalHits = results.totalHits;
 		System.out.println(numTotalHits + " total matching documents");
@@ -138,9 +148,18 @@ public class IndexInspectorJorge {
 				writer.addDocument(searcher.doc(hits[i].doc));
 
 			}
-
-
-
+			Map<String,Integer> terminos = new HashMap();
+			TermsEnum termsEnum = null;
+			Terms vector = reader.getTermVector(i , "title") ;
+			System.out.println(vector.toString());
+			termsEnum=vector.iterator(termsEnum);
+			BytesRef termino=null;
+			while((termino=termsEnum.next())!=null){
+				String nombre=termino.utf8ToString();
+				int frecuencia = (int)termsEnum.totalTermFreq();
+				terminos.put(nombre,frecuencia);				
+			}
+			System.out.println(terminos.toString());
 			Document doc = searcher.doc(hits[i].doc);
 			String path = doc.get("path");
 			if (path != null) {
