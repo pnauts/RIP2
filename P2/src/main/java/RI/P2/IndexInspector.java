@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +50,36 @@ import org.apache.lucene.util.Version;
 /** Simple command-line based search demo. */
 public class IndexInspector {
 
+	private static class tfidfElement implements Comparable<tfidfElement> {
+
+		private final String term;
+		private final int docId;
+		private final double score;
+
+		public tfidfElement(String term, int docId, double score) {
+			this.term = term;
+			this.docId = docId;
+			this.score = score;
+		}
+
+		public int compareTo(tfidfElement o) {
+			return Double.compare(o.score, this.score);
+		}
+
+		public String getTerm() {
+			return term;
+		}
+
+		public int getDocId() {
+			return docId;
+		}
+
+		public double getScore() {
+			return score;
+		}
+
+	}
+
 	private IndexInspector() {
 	}
 
@@ -74,6 +105,8 @@ public class IndexInspector {
 		String freqFilter = null;
 		String term = null;
 		int docLimit = -1;
+		double minScore = -1, maxScore = -1;
+		int filterDoc = -1;
 
 		for (int i = 0; i < args.length; i++) {
 			if ("-index".equals(args[i])) {
@@ -158,6 +191,40 @@ public class IndexInspector {
 				docLimit = Integer.parseInt(args[i + 1]);
 				i++;
 				freqFilter = "bt";
+			} else if ("-midterms".equals(args[i])) {
+				fields.add(args[i + 1]);
+				i++;
+				minScore = Double.parseDouble(args[i + 1]);
+				i++;
+				maxScore = Double.parseDouble(args[i + 1]);
+				i++;
+				freqFilter = "mt";
+			} else if ("-topterms2".equals(args[i])) {
+				fields.add(args[i + 1]);
+				i++;
+				filterDoc = Integer.parseInt(args[i + 1]);
+				i++;
+				docLimit = Integer.parseInt(args[i + 1]);
+				i++;
+				freqFilter = "tt2";
+			} else if ("-bottomterms2".equals(args[i])) {
+				fields.add(args[i + 1]);
+				i++;
+				filterDoc = Integer.parseInt(args[i + 1]);
+				i++;
+				docLimit = Integer.parseInt(args[i + 1]);
+				i++;
+				freqFilter = "bt2";
+			} else if ("-midterms2".equals(args[i])) {
+				fields.add(args[i + 1]);
+				i++;
+				filterDoc = Integer.parseInt(args[i + 1]);
+				i++;
+				minScore = Double.parseDouble(args[i + 1]);
+				i++;
+				maxScore = Double.parseDouble(args[i + 1]);
+				i++;
+				freqFilter = "mt2";
 			}
 		}
 
@@ -167,7 +234,8 @@ public class IndexInspector {
 		}
 
 		doPagingSearch(index, stqueries, outdir, fields, clauses, file, minDoc,
-				maxDoc, defPrint, minFreq, maxFreq, freqFilter, term, docLimit);
+				maxDoc, defPrint, minFreq, maxFreq, freqFilter, term, docLimit,
+				minScore, maxScore, filterDoc);
 	}
 
 	/**
@@ -185,7 +253,8 @@ public class IndexInspector {
 			Path outpath, List<String> fields,
 			List<BooleanClause.Occur> clauses, Path file, int minDoc,
 			int maxDoc, boolean defPrint, int minFreq, int maxFreq,
-			String freqFilter, String term, int docLimit) throws IOException {
+			String freqFilter, String term, int docLimit, double minScore,
+			double maxScore, int filterDoc) throws IOException {
 
 		IndexReader reader = DirectoryReader.open(FSDirectory.open(new File(
 				index)));
@@ -211,13 +280,13 @@ public class IndexInspector {
 			Terms terms = allfields.terms(fields.get(0));
 			TermsEnum termsEnum = terms.iterator(null);
 			String nombre = termsEnum.term().utf8ToString();
-			Map<Float, String> scoreMap = new HashMap<Float, String>();
 			int numDocs = reader.numDocs();
-			DefaultSimilarity dsm = new DefaultSimilarity();
+			List<tfidfElement> scores = new ArrayList<tfidfElement>();
 
 			while (termsEnum.next() != null) {
 				nombre = termsEnum.term().utf8ToString();
 				long docFreq = termsEnum.docFreq();
+				double idf = 0;
 
 				if (freqFilter.equals("df") && docFreq >= minFreq
 						&& docFreq <= maxFreq) {
@@ -225,34 +294,41 @@ public class IndexInspector {
 					continue;
 				}
 
-				if (freqFilter.equals("tt") || freqFilter.equals("bt")) {
-					scoreMap.put(
-							dsm.tf(termsEnum.totalTermFreq())
-									* dsm.idf(docFreq, numDocs), nombre);
+				if (freqFilter.startsWith("tt") || freqFilter.startsWith("bt")
+						|| freqFilter.startsWith("mt")) {
+					idf = Math.log(numDocs / docFreq);
 				}
 
-				else {
-					DocsEnum docsEnum = termsEnum.docs(null, null);
-					while (docsEnum.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
-						int id = docsEnum.docID();
-						long termFreq = docsEnum.freq();
-						if (freqFilter.equals("tf")) {
-							if (termFreq >= minFreq && termFreq <= maxFreq)
-								System.out.println("DocId: "
-										+ Integer.toString(id) + " Term: "
-										+ nombre + " TF: " + termFreq);
-						} else if (freqFilter.equals("tf2")
-								&& nombre.equals(term) && termFreq >= minFreq
-								&& termFreq <= maxFreq) {
-							System.out.println("Term: " + nombre + " appears "
-									+ termFreq + " times at Doc: " + id);
-						}
+				DocsEnum docsEnum = termsEnum.docs(null, null);
+				while (docsEnum.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
+					int id = docsEnum.docID();
+					long termFreq = docsEnum.freq();
+					double tfidf = 0;
+
+					if (freqFilter.equals("tf")) {
+						if (termFreq >= minFreq && termFreq <= maxFreq)
+							System.out.println("DocId: " + Integer.toString(id)
+									+ " Term: " + nombre + " TF: " + termFreq);
+					} else if (freqFilter.equals("tf2") && nombre.equals(term)
+							&& termFreq >= minFreq && termFreq <= maxFreq) {
+						System.out.println("Term: " + nombre + " appears "
+								+ termFreq + " times at Doc: " + id);
+					} else if (freqFilter.startsWith("tt")
+							|| freqFilter.startsWith("bt")
+							|| freqFilter.startsWith("mt")) {
+						tfidf = idf * (1 + Math.log(termFreq));
+						tfidfElement element = new tfidfElement(nombre, id,
+								tfidf);
+						scores.add(element);
+
 					}
 				}
 			}
-			if (!scoreMap.isEmpty()) {
-				mapSort(scoreMap, docLimit, freqFilter);
-				return;
+
+			if (freqFilter.startsWith("tt") || freqFilter.startsWith("bt")
+					|| freqFilter.startsWith("mt")) {
+				manageScores(scores, freqFilter, docLimit, minScore, maxScore,
+						filterDoc);
 			}
 
 			atomicReader.close();
@@ -350,22 +426,46 @@ public class IndexInspector {
 		reader.close();
 	}
 
-	private static void mapSort(Map<Float, String> unsortMap, int docLimit,
-			String freqFilter) {
+	private static void manageScores(List<tfidfElement> scores, String filter,
+			int docLimit, double minScore, double maxScore, int filterDoc) {
 
-		Map<Float, String> map = null;
+		Collections.sort(scores);
 
-		if ("tt".equals(freqFilter))
-			map = new TreeMap<Float, String>(unsortMap).descendingMap();
+		if (filter.startsWith("mt"))
+			docLimit = scores.size();
 
-		else if ("bt".equals(freqFilter))
-			map = new TreeMap<Float, String>(unsortMap);
-
-		for (Map.Entry<Float, String> entry : map.entrySet()) {
-			if (docLimit == 0)
-				return;
-			System.out.println(entry.getValue() + " " + entry.getKey());
-			docLimit--;
+		if (filter.startsWith("bt")) {
+			Collections.reverse(scores);
 		}
+
+		if (filter.endsWith("2")) {
+			int done = 0;
+			for (int i = 0; i < scores.size(); i++) {
+				if (done == docLimit)
+					return;
+				else {
+					tfidfElement element = scores.get(i);
+					if ((element.getDocId() == filterDoc)
+							&& (maxScore == -1 || (element.getScore() >= minScore && element
+									.getScore() <= maxScore))) {
+						System.out.println("(doc:" + element.getDocId()
+								+ ", term:" + element.getTerm() + ") "
+								+ "tf-idf: " + element.getScore());
+						done++;
+					}
+				}
+			}
+			return;
+		}
+
+		for (int i = 0; i < docLimit; i++) {
+			tfidfElement element = scores.get(i);
+			if (maxScore == -1
+					|| (element.getScore() >= minScore && element.getScore() <= maxScore))
+				System.out.println("(doc:" + element.getDocId() + ", term:"
+						+ element.getTerm() + ") " + "tf-idf: "
+						+ element.getScore());
+		}
+
 	}
 }
