@@ -115,6 +115,7 @@ public class IndexInspector {
 			} else if ("-query".equals(args[i])) {
 				fields.add(args[i + 1]);
 				stqueries.add(args[i + 2]);
+				clauses.add(BooleanClause.Occur.MUST);
 				i += 2;
 			} else if ("-out".equals(args[i])) {
 				outdir = Paths.get(args[i + 1]);
@@ -125,6 +126,7 @@ public class IndexInspector {
 					i++;
 					stqueries.add(args[i + 1]);
 					i++;
+					clauses.add(BooleanClause.Occur.SHOULD);
 				}
 			} else if ("-write".equals(args[i])) {
 				file = Paths.get(args[i + 1]);
@@ -279,7 +281,11 @@ public class IndexInspector {
 			Fields allfields = atomicReader.fields();
 			Terms terms = allfields.terms(fields.get(0));
 			TermsEnum termsEnum = terms.iterator(null);
-			String nombre = termsEnum.term().utf8ToString();
+			String nombre = null;
+			
+			if(termsEnum.term()!=null)
+				termsEnum.term().utf8ToString();
+			
 			int numDocs = reader.numDocs();
 			List<tfidfElement> scores = new ArrayList<tfidfElement>();
 
@@ -341,8 +347,8 @@ public class IndexInspector {
 		if (fields.size() == 0) {
 			Query query = new MatchAllDocsQuery();
 			booleanQuery.add(query, BooleanClause.Occur.SHOULD);
-		} else if (clauses == null) {
-			for (i = 0; i < fields.size(); i++) {
+		} else if (fields.size()>1) {
+			for (i = 0; i < queries.size(); i++) {
 				Query query = new TermQuery(new Term(fields.get(i),
 						queries.get(i)));
 				booleanQuery.add(query, clauses.get(i));
